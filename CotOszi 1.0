@@ -1,0 +1,1187 @@
+#region Using declarations
+using NinjaTrader.Cbi;
+using NinjaTrader.Data;
+using NinjaTrader.NinjaScript.DrawingTools;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Windows.Media;
+#endregion
+
+
+//This namespace holds Indicators in this folder and is required. Do not change it. 
+namespace NinjaTrader.NinjaScript.Indicators.Branpo
+{
+    public class Commercials : Indicator
+    {
+
+
+
+
+        private string SymConverted = "";
+
+        protected override void OnStateChange()
+        {
+            if (State == State.SetDefaults)
+            {
+                Description = @"Enter the description for your new custom Indicator here.";
+                Name = "Commercials_Oszilator";
+                Calculate = Calculate.OnBarClose;
+                IsOverlay = false;
+                DisplayInDataBox = true;
+                DrawOnPricePanel = true;
+                DrawHorizontalGridLines = true;
+                DrawVerticalGridLines = true;
+                PaintPriceMarkers = true;
+                ScaleJustification = NinjaTrader.Gui.Chart.ScaleJustification.Right;
+                //Disable this property if your indicator requires custom values that cumulate with each new market data event. 
+                //See Help Guide for additional information.
+                IsSuspendedWhileInactive = true;
+
+
+                AddPlot(Brushes.Navy, "Commercials_Netto");
+                AddPlot(Brushes.White, "OSZI_90");
+                AddPlot(Brushes.White, "OSZI_10");
+                AddPlot(Brushes.Red, "OSZI_Min");
+                AddPlot(Brushes.Green, "OSZI_Max");
+                AddPlot(Brushes.Orange, "COT_Oszi");
+
+                QuandlAPIKey = "Enter your QuandAPI key here";
+
+
+            }
+            else if (State == State.Historical)
+            {
+
+
+
+            }
+            else if (State == State.Configure)
+            {
+
+
+
+            }
+            else if (State == State.DataLoaded)
+            {
+
+                string SymNewSchool = (string)Instrument.MasterInstrument.Name;
+
+                string xSym = ReturnOldSchoolSym(SymNewSchool);
+
+                //	Print(xSym);
+                SymConverted = xSym;
+
+
+                COTMain(xSym);
+
+
+
+            }
+        }
+
+        private bool doOnce = false;
+        protected override void OnBarUpdate()
+        {
+
+            if (CurrentBar < Bars.Count - 2) return;
+
+            if (doOnce == false)
+            {
+                doOnce = true;
+                //	string  xSymTemp = 	  (string)Instrument.MasterInstrument.Name;	
+                //	string xSym = xSymTemp;
+                string FileName = SymConverted + ".csv";
+                string FolderSavePath = NinjaTrader.Core.Globals.UserDataDir + "APData\\" + "COT\\" + "OI\\";
+
+
+                MyCotDataList = MakeListOfCOTData(FolderSavePath + FileName);
+
+                if (MyCotDataList != null)
+                {
+                    SetPlotComNetto(MyCotDataList, Bars.Count);
+                    //SetPlot90(MyCotDataList, Bars.Count);
+                    //SetPlot10(MyCotDataList, Bars.Count);
+                    SetPlotMin(MyCotDataList, Bars.Count);
+                    SetPlotMax(MyCotDataList, Bars.Count);
+                    //SetPlotOszi(MyCotDataList, Bars.Count);
+                }
+
+                else
+                    Draw.TextFixed(this, "this", "No Data Available", TextPosition.TopRight);
+
+            }
+        }
+
+        public void COTMain(string xSym)
+        {
+
+            CreateCheckFolder();
+
+            string FileName = xSym + ".csv";
+            string FolderSavePath = NinjaTrader.Core.Globals.UserDataDir + "APData\\" + "COT\\" + "OI\\";
+
+            string filePath = FolderSavePath + FileName;
+
+            DateTime lastRunTime = ReadLastRunTimeFromFile();
+
+            //Assuming OI is released at 5PM MST.
+            TimeSpan reportTimeOfDay = new TimeSpan(17, 00, 00);
+
+            //Three ways to trigger new data download.
+            if (!File.Exists(filePath) //If file doesn't exist, meaning data aint there.
+                || (DateTime.Now.Date >= lastRunTime.AddDays(3).Date)       //If Last pull was yesterday.
+                || (DateTime.Now.TimeOfDay > reportTimeOfDay && DateTime.Now.Date != lastRunTime.Date))//if wasn't pulled today and the time is after 5.		
+            {
+
+
+                SaveLastRuntimeToTxt();
+
+                List<Url_Sym_Obj> urlList = MakeURLList(QuandlAPIKey);
+
+                foreach (Url_Sym_Obj s in urlList)
+                    DownloadDataQuandl(s.xUrl, FolderSavePath + s.xSym + ".csv");
+            }
+
+
+        }
+        public static void DownloadDataQuandl(string url, string FilePath)
+        {
+            string s = url;
+            //	string x=NinjaTrader.Core.Globals.UserDataDir + FilePath;	
+
+            try
+            {
+                //Delete file if its already there.
+                if (File.Exists(FilePath))
+                    File.Delete(FilePath);
+
+
+                using (WebClient webClient = new WebClient())  //If this is failing, delete the .zip folder in folder.
+                {
+
+
+                    webClient.DownloadFile(url, FilePath);
+                }
+            }
+            catch (Exception err)
+            {
+                throw new Exception("Sorry there was an error with downloading(): " + err.Message);
+            }
+        }
+
+
+
+        private void SetPlotComNetto(List<COTData_Obj> cotDataList, int barCount)
+        {
+            int numberOfPlotsToSet = Math.Min(barCount, cotDataList.Count);
+
+
+            for (int i = 0; i < numberOfPlotsToSet - 2; i++)
+            {
+                Print(cotDataList[i].Cn);
+                Values[0][i] = cotDataList[i].Cn;
+            }
+
+        }
+
+        private void SetPlot90(List<COTData_Obj> cotDataList, int barCount)
+        {
+            int numberOfPlotsToSet = Math.Min(barCount, cotDataList.Count);
+
+
+            for (int i = 0; i < numberOfPlotsToSet - 2; i++)
+                Values[1][i] = cotDataList[i].Upper;
+
+
+        }
+        private void SetPlot10(List<COTData_Obj> cotDataList, int barCount)
+        {
+            int numberOfPlotsToSet = Math.Min(barCount, cotDataList.Count);
+
+
+            for (int i = 0; i < numberOfPlotsToSet - 2; i++)
+                Values[2][i] = cotDataList[i].Lower;
+
+
+        }
+        private void SetPlotMin(List<COTData_Obj> cotDataList, int barCount)
+        {
+            int numberOfPlotsToSet = Math.Min(barCount, cotDataList.Count);
+
+
+            for (int i = 0; i < numberOfPlotsToSet - 2; i++)
+            {
+                //  Print(cotDataList[i].Min); 
+                Values[3][i] = cotDataList[i].Min;
+            }
+
+        }
+        private void SetPlotMax(List<COTData_Obj> cotDataList, int barCount)
+        {
+            int numberOfPlotsToSet = Math.Min(barCount, cotDataList.Count);
+
+
+            for (int i = 0; i < numberOfPlotsToSet - 2; i++)
+            {
+                Values[4][i] = cotDataList[i].Max;
+
+            }
+
+        }
+        private void SetPlotOszi(List<COTData_Obj> cotDataList, int barCount)
+        {
+            int numberOfPlotsToSet = Math.Min(barCount, cotDataList.Count);
+
+
+            for (int i = 0; i < numberOfPlotsToSet - 2; i++)
+            {
+                Values[5][i] = cotDataList[i].Oszi;
+
+            }
+
+        }
+
+
+        public class Url_Sym_Obj//Create Custom Object, an object with 2 objects inside..  //An object, with 2 objects inside.
+        {
+            public string xUrl { get; set; }
+            public string xSym { get; set; }
+
+
+        }
+        private static List<Url_Sym_Obj> MakeURLList(string myKey)
+        {
+
+            List<Url_Sym_Obj> UrlSymString_List = new List<Url_Sym_Obj>();
+
+            //RAPS FEHLT
+
+
+
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //S&P 500
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/13874P_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ES"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //S&P 500 Mini
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/13874A_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "MES"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Dow Jones
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/12460P_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "YM"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Dow Jones Mini
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/124603_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "MYM"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //NASDAQ
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/20974P_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "NQ"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //NASDAQ Mini
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/209742_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "MNQ"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //RUSSEL 2000
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/239742_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "RTY"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //NIKKEI
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/240741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "NKD"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //VIX
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/1170E1_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "VX"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //30 Year Bond
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/020601_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZB"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //2 Year Note
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/042601_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZT"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //5 Year Note
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/044601_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZF"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //10 Year Note
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/043602_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZN"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Federal Funds
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/045601_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZQ"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Ultra U.S. T-Bonds
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/020604_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "UB"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Ultra 10-year U.S. T-Notes
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/043607_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "TN"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //BitCoin
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/133741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "BTC"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Euro
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/099741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "6E"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Australischer Dollar
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/232741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "6A"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Brasilianischer Real
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/102741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "6L"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Britisches Pfund
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/096742_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "6B"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Japanischer Yen
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/097741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "6J"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Kanadischer Dollar
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/090741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "6C"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Mexikanischer Peso
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/095741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "6M"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Neuseeland Dollar
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/112741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "6N"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Russischer Rubel
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/089741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "6R"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Schweizer Franken
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/092741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "6S"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //3 Monate Euro Dollar
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/132741_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "GE"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //U.S. Dollar Index
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/098662_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "GE"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Gold
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/088691_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "GC"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Silber
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/084691_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "SI"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Silber
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/084691_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "SI"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Platin
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/076651_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "PL"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Palladium
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/075651_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "PA"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Kupfer
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/085692_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "HG"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Aluminium
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/191693_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "HG"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Stahl
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/192651_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "HRC"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Kohle
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/024656_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "COAL"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Rohöl WTI
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/067651_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "CL"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Benzin
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/111659_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "RB"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Heizöl
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/022651_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "UHO"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Erdgas
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/023651_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "NG"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Ethanol
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/025601_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "EH"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Chicago Ethanol
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/025651_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "CU"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Mais
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/002602_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZC"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Weizen SRW
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/001602_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZW"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Weizen HRW
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/001612_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "KE"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Reis
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/039601_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZR"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Hafer
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/004603_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZO"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Sojabohnen
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/005602_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZS"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Sojabohnen Mehl
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/026603_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZM"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Sojabohnen Öl
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/007601_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "ZL"
+            });
+
+            //RAPS FEHLT
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Kakao
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/073732_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "CC"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Baumwolle
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/033661_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "CT"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Baumwolle
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/040701_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "JO"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Kaffee
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/083731_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "KC"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Zucker
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/080732_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "SB"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Bauholz
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/058643_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "LBS"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Lebendrind
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/057642_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "LE"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Mastrind
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/061641_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "GF"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Magerschwein
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/054642_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "HE"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Butter
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/050642_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "CB"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Fettarme Milch
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/052642_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "GNF"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Milch3
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/052641_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "DC"
+            });
+            UrlSymString_List.Add(new Url_Sym_Obj
+            {
+                //fixed Spalte 6+7
+                //Milch4
+                xUrl = "https://www.quandl.com/api/v3/datasets/CFTC/052644_F_L_ALL.csv?api_key=" + myKey,
+                xSym = "GDK"
+            });
+
+            return UrlSymString_List;
+
+
+
+        }
+
+        public static List<COTData_Obj> MakeListOfCOTData(string FilePath)
+
+        {
+
+            MyCotDataList = new List<COTData_Obj>();
+
+
+            int Date_SplitIndexNum = 0;
+            int CL_SplitIndexNum = 6;
+            int CS_SplitIndexNum = 7;
+
+            string p1 = FilePath;
+
+            if (!File.Exists(p1))
+            {
+
+                NinjaTrader.Code.Output.Process("File does not exist.", PrintTo.OutputTab1);
+
+                return null;
+            }
+
+            StreamReader s1;
+
+            s1 = new System.IO.StreamReader(p1);
+
+            string Line1;
+            string[] split;
+
+            while ((Line1 = s1.ReadLine()) != null)
+            {
+
+                int splitCounter = 0;
+
+                split = Line1.Split(new char[] { ',' }, StringSplitOptions.None);
+
+
+
+                foreach (string s in split)
+                {
+
+                    //If it finds Date in row, then proper header found, and we should use this apporach.
+                    if (s.Equals("Date"))
+                    {
+                        Date_SplitIndexNum = splitCounter;
+
+                    }
+                    else if (s.Equals("Commercial Long"))
+                    {
+                        CL_SplitIndexNum = splitCounter;
+
+                    }
+                    else if (s.Equals("Commercial Short"))
+                    {
+                        CS_SplitIndexNum = splitCounter;
+
+                    }
+                    splitCounter++;
+                }
+
+                string myString;
+                DateTime dateFortmated;
+
+
+                try
+                {
+
+
+
+                    myString = split[Date_SplitIndexNum];
+
+                    dateFortmated = ParseDateFromString(myString);
+
+
+
+                }
+                catch
+                {
+                    NinjaTrader.Code.Output.Process("Header was caught", PrintTo.OutputTab1);
+                    continue;
+                }
+
+                double OIToUse = 0;
+
+
+
+                try
+                {
+                    if (double.TryParse(split[CL_SplitIndexNum], out OIToUse)) ;
+
+
+
+
+                }
+                catch (Exception e)
+                {
+                    continue;
+                }
+                try
+                {
+                    if (double.TryParse(split[CS_SplitIndexNum], out OIToUse)) ;
+
+
+
+
+                }
+                catch (Exception e)
+                {
+                    continue;
+                }
+
+                COTData_Obj row = new COTData_Obj
+                {
+                    Time = DateTime.Parse(split[0]),
+                    Cn = double.Parse(split[5]) - double.Parse(split[6]),
+                };
+
+                MyCotDataList.Add(row);
+
+                var last26CnValues = MyCotDataList
+                    .AsEnumerable()
+                       .Reverse()
+                        .Take(26)
+                          .Select(x => x.Cn)
+                        .ToArray();
+
+                row.Min = last26CnValues.Min();
+                row.Max = last26CnValues.Max();
+              
+                var Netto = MyCotDataList
+                    .AsEnumerable()
+                    .Select(x => x.Cn)
+                        .ToArray();
+                row.Netto = Netto.Last();
+                var Oszi1 = Netto.Last() - last26CnValues.Min();
+                var Oszi2 = last26CnValues.Max() - last26CnValues.Min() + 0.0000001;
+                row.Oszi = Oszi1 / Oszi2 * 100;
+                row.Upper = 90;
+                row.Lower = 10;
+            }
+
+            if (s1 != null)
+            {
+                s1.Dispose();
+                s1 = null;
+            }
+
+            return MyCotDataList;
+
+
+
+
+
+        }
+
+
+
+
+        public static DateTime ReadLastRunTimeFromFile()
+        {
+
+            DateTime lastRunTime = new DateTime(1900, 1, 1);
+            string FileName = "LastRan" + ".txt";
+            string FolderSavePath = NinjaTrader.Core.Globals.UserDataDir + "APData\\" + "COT\\" + "OI\\";
+
+
+            try
+            {
+                string FolderSavePathPlusFileName = FolderSavePath + FileName;
+
+                if (!File.Exists(FolderSavePathPlusFileName))
+                {
+
+                    NinjaTrader.Code.Output.Process("FILE DOES NOT EXIST FOR THIS CONTRACT.", PrintTo.OutputTab1);
+                    return lastRunTime;
+                }
+
+                StreamReader s1;
+
+                s1 = new System.IO.StreamReader(FolderSavePathPlusFileName);
+
+                string Line1;
+
+                int LineCounter = 0;
+
+                while ((Line1 = s1.ReadLine()) != null)
+                {
+
+                    if (LineCounter == 0)  //First line of file saved to xDate string variable.
+                        lastRunTime = DateTime.Parse(Line1);
+
+                    LineCounter++;
+
+                }
+
+                if (s1 != null)
+                {
+                    s1.Dispose();
+                    s1 = null;
+                }
+            }
+            catch (Exception e)
+            {
+                NinjaTrader.Code.Output.Process("Exception in SaveLastRuntimeToTxt" + e.ToString(), PrintTo.OutputTab1);
+
+                return lastRunTime;
+            }
+
+            return lastRunTime;
+
+        }
+        public static void SaveLastRuntimeToTxt()
+        {
+
+            DateTime lastRunTime = DateTime.Now;
+            string FileName = "LastRan" + ".txt";
+            string FolderSavePath = NinjaTrader.Core.Globals.UserDataDir + "APData\\" + "COT\\" + "OI\\";
+
+            NinjaTrader.Code.Output.Process("Calling SaveLastRuntimeToTxt", PrintTo.OutputTab1);
+
+            try
+            {
+                string FolderSavePathPlusFileName = FolderSavePath + FileName;
+
+                if (!Directory.Exists(FolderSavePath))
+                {
+
+                    Directory.CreateDirectory(FolderSavePath);
+                }
+
+                if (File.Exists(FolderSavePathPlusFileName))
+                    File.Delete(FolderSavePathPlusFileName);//DELETE FILE IF ITS ALREADY THERE.
+
+                if (!File.Exists(FolderSavePathPlusFileName))
+                {
+
+                    using (StreamWriter sw = File.CreateText(FolderSavePathPlusFileName))
+                    {
+
+                        sw.WriteLine(lastRunTime.ToString());
+
+                        sw.Close();
+                        sw.Dispose();
+                    }
+
+
+                }
+
+            }
+            catch (Exception e)
+            {
+                NinjaTrader.Code.Output.Process("Exception in SaveLastRuntimeToTxt" + e.ToString(), PrintTo.OutputTab1);
+            }
+
+
+
+        }
+
+        public static DateTime ParseDateFromString(string s)
+        {
+
+
+
+            try
+            {
+                //Awesome method.  These are all the types of datetime types you can parse.  Add more as they change.
+                string[] formats = { "yyyyMMdd","MM/dd/yyyy","MM-dd-yyyy","M-dd-yyyy", "M-d-yyyy", "MM-d-yyyy",
+                "yyyy-MM-dd", "yyyy-M-d", "yyyy-MM-d", "yyyy-M-dd",
+                "M/dd/yyyy", "M/d/yyyy", "MM/d/yyyy",   "MM/dd/yyyy hh:mm:ss tt",   "yyyy-MM-dd hh:mm:ss" };
+
+                string myString;
+                DateTime dateFortmated;
+
+                dateFortmated = DateTime.ParseExact(s, formats, new CultureInfo("en-GB"), DateTimeStyles.None);
+                return dateFortmated;
+
+            }
+            catch (Exception error)
+            {
+
+                //Will try our new extensive list of formats if the first doesnt' work.
+
+                NinjaTrader.Code.Output.Process("Problem in ParseDateFromString, Trying backup method.  New list of formats:", PrintTo.OutputTab1);
+
+                string[] formats = { "yyyyMMdd","MM/dd/yyyy","MM-dd-yyyy","M-dd-yyyy", "M-d-yyyy", "MM-d-yyyy",
+                    "yyyy-MM-dd", "yyyy-M-d", "yyyy-MM-d", "yyyy-M-dd",
+                    "M/dd/yyyy", "M/d/yyyy", "MM/d/yyyy",   "MM/dd/yyyy hh:mm:ss tt",   "yyyy-MM-dd hh:mm:ss" ,
+                    "M/d/yyyy","M/d/yy","MM/dd/yy","MM/dd/yyyy","yy/MM/dd","yyyy-MM-dd",
+                    "dd-MMM-yy","dddd, MMMM d, yyyy","dddd, MMMM dd, yyyy","MMMM dd, yyyy","dddd, dd MMMM, yyyy","dd MMMM, yyyy",
+                    "dddd, MMMM d, yyyy h:mm tt","dddd, MMMM d, yyyy hh:mm tt","dddd, MMMM d, yyyy H:mm",
+                    "dddd, MMMM d, yyyy HH:mm","dddd, MMMM dd, yyyy h:mm tt","dddd, MMMM dd, yyyy hh:mm tt",
+                    "dddd, MMMM dd, yyyy H:mm","dddd, MMMM dd, yyyy HH:mm","MMMM dd, yyyy h:mm tt",
+                    "MMMM dd, yyyy hh:mm tt","MMMM dd, yyyy H:mm","MMMM dd, yyyy HH:mm","dddd, dd MMMM, yyyy h:mm tt",
+                    "dddd, dd MMMM, yyyy hh:mm tt","dddd, dd MMMM, yyyy H:mm","dddd, dd MMMM, yyyy HH:mm","dd MMMM, yyyy h:mm tt",
+                    "dd MMMM, yyyy hh:mm tt","dd MMMM, yyyy H:mm","dd MMMM, yyyy HH:mm","dddd, MMMM d, yyyy h:mm:ss tt","dddd, MMMM d, yyyy hh:mm:ss tt",
+                    "dddd, MMMM d, yyyy H:mm:ss","dddd, MMMM d, yyyy HH:mm:ss","dddd, MMMM dd, yyyy h:mm:ss tt","dddd, MMMM dd, yyyy hh:mm:ss tt",
+                    "dddd, MMMM dd, yyyy H:mm:ss","dddd, MMMM dd, yyyy HH:mm:ss","MMMM dd, yyyy h:mm:ss tt","MMMM dd, yyyy hh:mm:ss tt",
+                    "MMMM dd, yyyy H:mm:ss","MMMM dd, yyyy HH:mm:ss","dddd, dd MMMM, yyyy h:mm:ss tt",
+                    "dddd, dd MMMM, yyyy hh:mm:ss tt","dddd, dd MMMM, yyyy H:mm:ss","dddd, dd MMMM, yyyy HH:mm:ss","dd MMMM, yyyy h:mm:ss tt",
+                    "dd MMMM, yyyy hh:mm:ss tt","dd MMMM, yyyy H:mm:ss","dd MMMM, yyyy HH:mm:ss","M/d/yyyy h:mm tt","M/d/yyyy hh:mm tt","M/d/yyyy H:mm",
+                    "M/d/yyyy HH:mm","M/d/yy h:mm tt","M/d/yy hh:mm tt","M/d/yy H:mm","M/d/yy HH:mm","MM/dd/yy h:mm tt",
+                    "MM/dd/yy hh:mm tt","MM/dd/yy H:mm","MM/dd/yy HH:mm","MM/dd/yyyy h:mm tt",
+                    "MM/dd/yyyy hh:mm tt","MM/dd/yyyy H:mm","MM/dd/yyyy HH:mm","yy/MM/dd h:mm tt",
+                    "yy/MM/dd hh:mm tt","yy/MM/dd H:mm","yy/MM/dd HH:mm","yyyy-MM-dd h:mm tt","yyyy-MM-dd hh:mm tt",
+                    "yyyy-MM-dd H:mm","yyyy-MM-dd HH:mm","dd-MMM-yy h:mm tt","dd-MMM-yy hh:mm tt","dd-MMM-yy H:mm","dd-MMM-yy HH:mm",
+                    "M/d/yyyy h:mm:ss tt","M/d/yyyy hh:mm:ss tt","M/d/yyyy H:mm:ss",
+                    "M/d/yyyy HH:mm:ss","M/d/yy h:mm:ss tt","M/d/yy hh:mm:ss tt","M/d/yy H:mm:ss","M/d/yy HH:mm:ss",
+                    "MM/dd/yy h:mm:ss tt","MM/dd/yy hh:mm:ss tt","MM/dd/yy H:mm:ss","MM/dd/yy HH:mm:ss","MM/dd/yyyy h:mm:ss tt",
+                    "MM/dd/yyyy hh:mm:ss tt","MM/dd/yyyy H:mm:ss","MM/dd/yyyy HH:mm:ss","yy/MM/dd h:mm:ss tt",
+                    "yy/MM/dd hh:mm:ss tt","yy/MM/dd H:mm:ss","yy/MM/dd HH:mm:ss","yyyy-MM-dd h:mm:ss tt","yyyy-MM-dd hh:mm:ss tt",
+                    "yyyy-MM-dd H:mm:ss","yyyy-MM-dd HH:mm:ss","dd-MMM-yy h:mm:ss tt","dd-MMM-yy hh:mm:ss tt","dd-MMM-yy H:mm:ss",
+                    "dd-MMM-yy HH:mm:ss","MMMM dd","MMMM dd","yyyy'-'MM'-'dd'T'HH':'mm':'ss.fffffffK","yyyy'-'MM'-'dd'T'HH':'mm':'ss.fffffffK",
+                    "ddd, dd MMM yyyy HH':'mm':'ss 'GMT'","ddd, dd MMM yyyy HH':'mm':'ss 'GMT'","yyyy'-'MM'-'dd'T'HH':'mm':'ss",
+                    "h:mm tt","hh:mm tt","H:mm","HH:mm","h:mm:ss tt","hh:mm:ss tt","H:mm:ss","HH:mm:ss",
+                    "yyyy'-'MM'-'dd HH':'mm':'ss'Z'","dddd, MMMM d, yyyy h:mm:ss tt","dddd, MMMM d, yyyy hh:mm:ss tt","dddd, MMMM d, yyyy H:mm:ss",
+                    "dddd, MMMM d, yyyy HH:mm:ss","dddd, MMMM dd, yyyy h:mm:ss tt",
+                    "dddd, MMMM dd, yyyy hh:mm:ss tt","dddd, MMMM dd, yyyy H:mm:ss","dddd, MMMM dd, yyyy HH:mm:ss","MMMM dd, yyyy h:mm:ss tt",
+                    "MMMM dd, yyyy hh:mm:ss tt","MMMM dd, yyyy H:mm:ss","MMMM dd, yyyy HH:mm:ss","dddd, dd MMMM, yyyy h:mm:ss tt",
+                    "dddd, dd MMMM, yyyy hh:mm:ss tt","dddd, dd MMMM, yyyy H:mm:ss", "dddd, dd MMMM, yyyy HH:mm:ss","dd MMMM, yyyy h:mm:ss tt",
+                    "dd MMMM, yyyy hh:mm:ss tt","dd MMMM, yyyy H:mm:ss",
+                    "dd MMMM, yyyy HH:mm:ss", "MMMM yyyy", "MMMM, yyyy", "MMMM yyyy","MMMM, yyyy"};
+
+
+                string myString;
+                DateTime dateFortmated;
+
+
+                dateFortmated = DateTime.ParseExact(s, formats, new CultureInfo("en-GB"), DateTimeStyles.None);
+                return dateFortmated;
+
+
+
+
+            }
+
+
+
+
+        }
+        private static string ReturnOldSchoolSym(string NewSchoolSym)
+        {
+
+            //The Symbols are updated but if in they Change in the future they could be used with this code so i kept it in
+
+
+            string xSym = NewSchoolSym;
+            /*			
+                            if(NewSchoolSym.Equals("newsymbol"))
+                                xSym ="oldsymbol";
+                           	
+                */
+            return xSym;
+
+        }
+
+
+        public static void CreateCheckFolder()
+        {
+            if (!Directory.Exists(NinjaTrader.Core.Globals.UserDataDir + "APData\\"))
+            {
+                NinjaTrader.Code.Output.Process("Creating APData Folder", PrintTo.OutputTab1);
+                Directory.CreateDirectory(NinjaTrader.Core.Globals.UserDataDir + "APData\\");
+            }
+            if (!Directory.Exists(NinjaTrader.Core.Globals.UserDataDir + "APData\\" + "COT\\"))
+            {
+                NinjaTrader.Code.Output.Process("Creating COT Folder", PrintTo.OutputTab1);
+                Directory.CreateDirectory(NinjaTrader.Core.Globals.UserDataDir + "APData\\" + "COT\\");
+            }
+            if (!Directory.Exists(NinjaTrader.Core.Globals.UserDataDir + "APData\\" + "COT\\" + "OI\\"))
+            {
+                NinjaTrader.Code.Output.Process("Creating OI Folder", PrintTo.OutputTab1);
+                Directory.CreateDirectory(NinjaTrader.Core.Globals.UserDataDir + "APData\\" + "COT\\" + "OI\\");
+            }
+
+
+        }
+
+
+        [NinjaScriptProperty]
+        [Display(Name = "QuandlAPIKey", GroupName = "Parameters", Order = 0)]
+        public string QuandlAPIKey
+        { get; set; }
+
+
+        private static List<COTData_Obj> MyCotDataList;
+        public class COTData_Obj  //Create Custom Object, an object with 3 objects inside..  //An object, with 2 objects inside.
+        {
+            public string Symbol { get; set; }
+            public DateTime Time { get; set; }
+            public double Cn { get; set; }
+            public double Max { get; set; }
+            public double Min { get; set; }
+            public double Upper { get; set; }
+            public double Lower { get; set; }
+            public double Oszi { get; set; }
+            public double Netto { get; set; }
+
+        }
+
+
+    }
+}
+
+#region NinjaScript generated code. Neither change nor remove.
+
+namespace NinjaTrader.NinjaScript.Indicators
+{
+	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
+	{
+		private Branpo.Commercials[] cacheCommercials;
+		public Branpo.Commercials Commercials(string quandlAPIKey)
+		{
+			return Commercials(Input, quandlAPIKey);
+		}
+
+		public Branpo.Commercials Commercials(ISeries<double> input, string quandlAPIKey)
+		{
+			if (cacheCommercials != null)
+				for (int idx = 0; idx < cacheCommercials.Length; idx++)
+					if (cacheCommercials[idx] != null && cacheCommercials[idx].QuandlAPIKey == quandlAPIKey && cacheCommercials[idx].EqualsInput(input))
+						return cacheCommercials[idx];
+			return CacheIndicator<Branpo.Commercials>(new Branpo.Commercials(){ QuandlAPIKey = quandlAPIKey }, input, ref cacheCommercials);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
+{
+	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
+	{
+		public Indicators.Branpo.Commercials Commercials(string quandlAPIKey)
+		{
+			return indicator.Commercials(Input, quandlAPIKey);
+		}
+
+		public Indicators.Branpo.Commercials Commercials(ISeries<double> input , string quandlAPIKey)
+		{
+			return indicator.Commercials(input, quandlAPIKey);
+		}
+	}
+}
+
+namespace NinjaTrader.NinjaScript.Strategies
+{
+	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
+	{
+		public Indicators.Branpo.Commercials Commercials(string quandlAPIKey)
+		{
+			return indicator.Commercials(Input, quandlAPIKey);
+		}
+
+		public Indicators.Branpo.Commercials Commercials(ISeries<double> input , string quandlAPIKey)
+		{
+			return indicator.Commercials(input, quandlAPIKey);
+		}
+	}
+}
+
+#endregion
