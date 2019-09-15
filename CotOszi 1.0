@@ -12,7 +12,6 @@ using System.Net;
 using System.Windows.Media;
 #endregion
 
-
 //This namespace holds Indicators in this folder and is required. Do not change it. 
 namespace NinjaTrader.NinjaScript.Indicators.Branpo
 {
