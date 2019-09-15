@@ -254,7 +254,9 @@ namespace NinjaTrader.NinjaScript.Indicators.Branpo
 
 
         }
-        private static List<Url_Sym_Obj> MakeURLList(string myKey)
+summary1. click to expand
+```csharp
+private static List<Url_Sym_Obj> MakeURLList(string myKey)
         {
 
             List<Url_Sym_Obj> UrlSymString_List = new List<Url_Sym_Obj>();
@@ -726,7 +728,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Branpo
 
 
         }
-
+```
         public static List<COTData_Obj> MakeListOfCOTData(string FilePath)
 
         {
