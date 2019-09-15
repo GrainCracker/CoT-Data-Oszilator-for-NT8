@@ -254,8 +254,6 @@ namespace NinjaTrader.NinjaScript.Indicators.Branpo
 
 
         }
-summary1. click to expand
-```csharp
 private static List<Url_Sym_Obj> MakeURLList(string myKey)
         {
 
